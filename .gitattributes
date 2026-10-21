@@ -1,0 +1,6 @@
+# Upstream license text keeps its exact bytes; fonts and images are binary.
+Licenses/CascadiaCode/OFL.txt -text
+*.ttf binary
+*.png binary
+# The control-plane protocol keeps LF bytes in every checkout.
+Unity/Packages/com.skunkworks.protocol/** text eol=lf

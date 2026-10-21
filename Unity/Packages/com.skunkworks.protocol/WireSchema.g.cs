@@ -1,0 +1,32 @@
+// Generated from schema.json. Run Unity/Packages/com.skunkworks.protocol/generate.ps1.
+public enum MessageKind : byte
+{
+    Hello = 1,
+    Ready = 2,
+    Find = 10,
+    Type = 11,
+    Component = 12,
+    Get = 13,
+    Set = 14,
+    Call = 15,
+    New = 16,
+    Release = 17,
+    Batch = 18,
+    Result = 20,
+    Fault = 21,
+}
+public enum ValueKind : byte
+{
+    Null = 0,
+    Boolean = 1,
+    Int32 = 2,
+    Int64 = 3,
+    Single = 4,
+    Double = 5,
+    String = 6,
+    Object = 7,
+    Type = 8,
+    Bytes = 9,
+    Batch = 10,
+}
+public static class WireSchema { public const string Protocol = "skunkworks.wire/1"; public const int MaxFrame = 1048576; public const int MaxValues = 4096; }

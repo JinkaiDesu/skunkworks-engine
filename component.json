@@ -1,0 +1,15 @@
+{
+  "schema": "emergence.component/1",
+  "id": "skunkworks",
+  "name": "Skunkworks",
+  "kind": "product",
+  "distribution": "demo",
+  "version": "0.6.1-experimental",
+  "description": "Reflective Unity (Mono) game engine: UnityEngine, the CLR and assembly DLLs from any shell.",
+  "requires": {},
+  "external": {
+    "unity": {
+      "version": "6000.5.6f1"
+    }
+  }
+}

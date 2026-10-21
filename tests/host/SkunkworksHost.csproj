@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    A headless Skunkworks for the tests. It compiles the Unity project's own protocol,
+    reflection broker and control server, so the tests exercise the code a player
+    runs. Build with -p:SkunkworksSource=<the Skunkworks checkout>.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>CS0162;CS0168;CS0219;CS0414;CS0649</NoWarn>
+  </PropertyGroup>
+  <Target Name="RequireSkunkworks" BeforeTargets="CoreCompile">
+    <Error Condition="'$(SkunkworksSource)' == '' Or !Exists('$(SkunkworksSource)/Unity/Assets/Scripts/Reflection.cs')"
+           Text="Set SkunkworksSource to a Skunkworks checkout." />
+  </Target>
+  <ItemGroup>
+    <Compile Include="$(SkunkworksSource)/Unity/Packages/com.skunkworks.protocol/Wire.cs" Link="Skunkworks/Wire.cs" />
+    <Compile Include="$(SkunkworksSource)/Unity/Packages/com.skunkworks.protocol/WireSchema.g.cs" Link="Skunkworks/WireSchema.g.cs" />
+    <Compile Include="$(SkunkworksSource)/Unity/Assets/Scripts/Reflection.cs" Link="Skunkworks/Reflection.cs" />
+    <Compile Include="$(SkunkworksSource)/Unity/Assets/Scripts/NativeValues.cs" Link="Skunkworks/NativeValues.cs" />
+    <Compile Include="$(SkunkworksSource)/Unity/Assets/Scripts/IPC/ControlServer.cs" Link="Skunkworks/ControlServer.cs" />
+    <Compile Include="Host.cs" />
+  </ItemGroup>
+</Project>

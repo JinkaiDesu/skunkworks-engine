@@ -1,0 +1,39 @@
+Skunkworks
+Copyright (C) 2026 Jinkai
+SPDX-License-Identifier: GPL-2.0-only
+
+Skunkworks is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License version 2, as published by the
+Free Software Foundation. Version 2 only: no later version applies. The full
+license is in LICENSE.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+
+The license covers the original Skunkworks source in this repository,
+including the C# source, the Unity project's Assets/, ProjectSettings/ and
+protocol package (under Unity/), and
+the rest of the original material here.
+
+It does not cover Unity. The Unity Editor, engine and player runtime, and the
+Unity packages named in Unity/Packages/manifest.json, remain under
+Unity's own terms. A Skunkworks player build contains the Unity runtime; this
+license grants rights to the Skunkworks source, not to Unity.
+
+The only Skunkworks binary published is the website demo,
+skunkworks v<version>-demo. To make games with Skunkworks, build it from this
+source under your own Unity license.
+
+Third-party files in this repository keep their own licenses:
+
+- Reddit Mono (Unity/Assets/Resources/RedditMono-Regular.ttf):
+  SIL Open Font License 1.1. License: Licenses/RedditMono/OFL.txt.
+- Cascadia Code (Unity/Assets/Resources/CascadiaCode-Regular.ttf):
+  SIL Open Font License 1.1. License: Licenses/CascadiaCode/OFL.txt.
+- Unity's default runtime theme (Unity/Assets/UI Toolkit/UnityThemes/):
+  Unity's terms.
+
+A release carries these notices under
+Licenses/.

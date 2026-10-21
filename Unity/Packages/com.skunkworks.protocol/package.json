@@ -1,0 +1,6 @@
+{
+  "name": "com.skunkworks.protocol",
+  "version": "1.0.0",
+  "displayName": "Skunkworks protocol",
+  "description": "Canonical control-plane framing, values and versioned schema."
+}

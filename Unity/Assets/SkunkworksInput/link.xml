@@ -1,0 +1,15 @@
+<linker>
+  <!-- These public APIs are consumed by DLLs loaded AFTER the Unity build. -->
+  <assembly fullname="Assembly-CSharp">
+    <type fullname="InputEvents" preserve="all" />
+    <type fullname="InputProgram" preserve="all" />
+    <type fullname="InputSample" preserve="all" />
+    <type fullname="InputKind" preserve="all" />
+    <type fullname="InputModifiers" preserve="all" />
+  </assembly>
+  <assembly fullname="UnityEngine.IMGUIModule">
+    <type fullname="UnityEngine.GUIUtility">
+      <property name="systemCopyBuffer" />
+    </type>
+  </assembly>
+</linker>

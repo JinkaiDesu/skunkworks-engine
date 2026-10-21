@@ -1,0 +1,3 @@
+# Build output from dotnet or an IDE; CI builds with --artifacts-path elsewhere.
+bin/
+obj/

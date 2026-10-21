@@ -1,0 +1,40 @@
+# Generated applications and downloaded tool payloads
+/Release/
+/artifacts/
+/World/
+/Dev/Runtime/
+/Dev/System/
+*.zip
+*.7z
+*.tar.*
+*.exe
+*.dll
+*.pdb
+# Unity generated state (source assets and their metadata remain tracked)
+/Unity/Library/
+/Unity/Temp/
+/Unity/Logs/
+/Unity/obj/
+/Unity/UserSettings/
+/Unity/.vs/
+/Unity/.vscode/
+/Unity/*.csproj
+/Unity/*.sln*
+/Unity/Assets/Scripts/*.legacy*
+# The performance test package writes these during a build
+/Unity/Assets/Resources/PerformanceTestRunInfo.json*
+/Unity/Assets/Resources/PerformanceTestRunSettings.json*
+# Build/test state
+**/bin/
+**/obj/
+**/build/
+# Unity's Assets/Build holds the player icon (matched by build/ on case-insensitive Windows)
+!/Unity/Assets/Build/
+*.log
+.vs/
+.DS_Store
+
+/.vscode/
+__pycache__/
+*.pyc
+/ci.config.json

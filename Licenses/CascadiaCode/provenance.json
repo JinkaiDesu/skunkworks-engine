@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/microsoft/cascadia-code",
+  "tag": "v2407.24",
+  "commit": "56bcca3f2c1e4cb19458954f0e2bb4635960df91",
+  "archiveUrl": "https://github.com/microsoft/cascadia-code/releases/download/v2407.24/CascadiaCode-2407.24.zip",
+  "archiveSha256": "e67a68ee3386db63f48b9054bd196ea752bc6a4ebb4df35adce6733da50c8474",
+  "file": "ttf/static/CascadiaCode-Regular.ttf",
+  "sha256": "c33ef522cdfeff99907fb54f3e97152bb18bfb9b56ec2fef4d4ceec51c8974a4",
+  "license": "OFL.txt",
+  "licenseSha256": "51882cd3cdba4e16f220f44ddb08a635c38c44ea6e0975db2574f4be6f958238",
+  "role": "Bundled terminal fallback restricted to U+2500-U+257F box drawing; Reddit Mono remains primary and Unicode/emoji expansion is deferred"
+}
