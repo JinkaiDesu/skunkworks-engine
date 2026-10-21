@@ -59,8 +59,10 @@ public sealed class Main : MonoBehaviour
     private void Update()
     {
         if (Volatile.Read(ref stopped) != 0) return;
-        window?.Pump();
-        input?.Program?.Pump();
+        UnityEngine.Profiling.Profiler.BeginSample("Skunkworks.Window.Pump");
+        try { window?.Pump(); } finally { UnityEngine.Profiling.Profiler.EndSample(); }
+        UnityEngine.Profiling.Profiler.BeginSample("Skunkworks.Input.Pump");
+        try { input?.Program?.Pump(); } finally { UnityEngine.Profiling.Profiler.EndSample(); }
         string error = input?.Program?.LastSubscriberError;
         if (!string.IsNullOrEmpty(error) && error != reportedInputError)
         {
@@ -68,7 +70,8 @@ public sealed class Main : MonoBehaviour
             SystemPaths.Log("input", error);
             Debug.LogError("[input] " + error);
         }
-        control?.Pump(reflection.HandleOwned, reflection.ReleaseOwner, 64, reflection.DescribeRequest);
+        UnityEngine.Profiling.Profiler.BeginSample("Skunkworks.IPC.Pump");
+        try { control?.Pump(reflection.HandleOwned, reflection.ReleaseOwner, 64, reflection.DescribeRequest); } finally { UnityEngine.Profiling.Profiler.EndSample(); }
     }
 
     private static void Report(string source, Exception error)

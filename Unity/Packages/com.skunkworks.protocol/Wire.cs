@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 
 public sealed class Value
@@ -420,75 +421,19 @@ public static class Wire
             );
         }
 
-        using (
-            var memory =
-                new MemoryStream(
-                    body,
-                    false
-                )
-        )
-        using (
-            var reader =
-                new BinaryReader(
-                    memory,
-                    Encoding.UTF8,
-                    true
-                )
-        )
-        {
-            MessageKind kind =
-                (MessageKind)
-                    reader.ReadByte();
-
-            if (!Enum.IsDefined(typeof(MessageKind), kind))
-                throw new InvalidDataException("Unknown message kind.");
-            long id =
-                reader.ReadInt64();
-
-            int count =
-                reader.ReadInt32();
-
-            if (
-                count < 0 ||
-                count > MaxValues
-            )
-            {
-                throw new InvalidDataException(
-                    "Invalid wire value count."
-                );
-            }
-
-            var values =
-                new Value[count];
-
-            for (
-                int i = 0;
-                i < count;
-                i++
-            )
-            {
-                values[i] =
-                    ReadValue(
-                        reader
-                    );
-            }
-
-            if (
-                memory.Position !=
-                memory.Length
-            )
-            {
-                throw new InvalidDataException(
-                    "Trailing bytes in wire frame."
-                );
-            }
-
-            return new Message(
-                id,
-                kind,
-                values
-            );
-        }
+        var reader = new BodyReader(body);
+        MessageKind kind = (MessageKind)reader.ReadByte();
+        if (!Enum.IsDefined(typeof(MessageKind), kind))
+            throw new InvalidDataException("Unknown message kind.");
+        long id = reader.ReadInt64();
+        int count = reader.ReadInt32();
+        if (count < 0 || count > MaxValues)
+            throw new InvalidDataException("Invalid wire value count.");
+        var values = new Value[count];
+        for (int i = 0; i < count; i++) values[i] = ReadValue(ref reader);
+        if (reader.Position != body.Length)
+            throw new InvalidDataException("Trailing bytes in wire frame.");
+        return new Message(id, kind, values);
     }
 
 
@@ -585,7 +530,7 @@ public static class Wire
 
 
     private static Value ReadValue(
-        BinaryReader reader)
+        ref BodyReader reader)
     {
         ValueKind kind =
             (ValueKind)
@@ -623,9 +568,7 @@ public static class Wire
 
             case ValueKind.String:
                 return Value.String(
-                    ReadString(
-                        reader
-                    )
+                    reader.ReadString()
                 );
 
             case ValueKind.Object:
@@ -713,37 +656,72 @@ public static class Wire
     }
 
 
-    private static string ReadString(
-        BinaryReader reader)
-    {
-        int length =
-            reader.ReadInt32();
+    // The body is already a bounded buffer. Decode it directly instead of
+    // allocating a stream, reader, and a temporary byte[] for every string.
+    private struct BodyReader {
+        private readonly byte[] body;
+        public int Position { get; private set; }
 
-        if (
-            length < 0 ||
-            length > MaxFrame
-        )
-        {
-            throw new InvalidDataException(
-                "Invalid string length."
-            );
+        public BodyReader(byte[] body) { this.body = body; Position = 0; }
+
+        private void Require(int length) {
+            if (length > body.Length - Position) throw new EndOfStreamException();
         }
 
-        byte[] bytes =
-            reader.ReadBytes(
-                length
-            );
-
-        if (
-            bytes.Length !=
-            length
-        )
-        {
-            throw new EndOfStreamException();
+        private void RequirePrimitive(int length) {
+            if (length <= body.Length - Position) return;
+            // BinaryReader supplies the platform's original truncated-scalar
+            // exception/message. This allocation is only on malformed input.
+            using (var memory = new MemoryStream(body, false))
+            using (var reader = new BinaryReader(memory, Encoding.UTF8, true)) {
+                memory.Position = Position;
+                if (length == 1) reader.ReadByte();
+                else if (length == 4) reader.ReadInt32();
+                else reader.ReadInt64();
+            }
         }
 
-        return Encoding.UTF8.GetString(
-            bytes
-        );
+        public byte ReadByte() { RequirePrimitive(1); return body[Position++]; }
+        public bool ReadBoolean() { return ReadByte() != 0; }
+
+        public int ReadInt32() {
+            RequirePrimitive(4);
+            int offset = Position; Position += 4;
+            return body[offset] | body[offset + 1] << 8 |
+                   body[offset + 2] << 16 | body[offset + 3] << 24;
+        }
+
+        public long ReadInt64() {
+            RequirePrimitive(8);
+            uint low = unchecked((uint)ReadInt32()), high = unchecked((uint)ReadInt32());
+            return unchecked((long)((ulong)low | (ulong)high << 32));
+        }
+
+        public float ReadSingle() { return new SingleBits { Bits = ReadInt32() }.Value; }
+        public double ReadDouble() { return BitConverter.Int64BitsToDouble(ReadInt64()); }
+
+        public byte[] ReadBytes(int length) {
+            Require(length);
+            if (length == 0) return Array.Empty<byte>();
+            var bytes = new byte[length];
+            Buffer.BlockCopy(body, Position, bytes, 0, length); Position += length;
+            return bytes;
+        }
+
+        public string ReadString() {
+            int length = ReadInt32();
+            if (length < 0 || length > MaxFrame)
+                throw new InvalidDataException("Invalid string length.");
+            Require(length);
+            string value = Encoding.UTF8.GetString(body, Position, length);
+            Position += length;
+            return value;
+        }
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct SingleBits {
+        [FieldOffset(0)] public int Bits;
+        [FieldOffset(0)] public float Value;
     }
 }

@@ -177,7 +177,7 @@ public static class Build
                     BuildTarget.StandaloneWindows64,
 
                 options =
-                    BuildOptions.None
+                    (Environment.GetEnvironmentVariable("SKUNK_PROFILE_BUILD") == "1" ? BuildOptions.Development : BuildOptions.None)
             };
 
 

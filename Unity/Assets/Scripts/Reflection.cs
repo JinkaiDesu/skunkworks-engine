@@ -20,8 +20,9 @@ internal sealed class ReflectionBroker
     {
         string previous = currentOwner;
         currentOwner = owner;
+        UnityEngine.Profiling.Profiler.BeginSample("Skunkworks.Reflection.Handle");
         try { return Handle(request); }
-        finally { currentOwner = previous; }
+        finally { currentOwner = previous; UnityEngine.Profiling.Profiler.EndSample(); }
     }
     internal void ReleaseOwner(string owner)
     {
