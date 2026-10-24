@@ -12,6 +12,7 @@ public enum MessageKind : byte
     New = 16,
     Release = 17,
     Batch = 18,
+    Wait = 19,
     Result = 20,
     Fault = 21,
 }

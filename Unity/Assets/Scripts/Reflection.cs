@@ -23,6 +23,63 @@ internal sealed class ReflectionBroker
         try { return Handle(request); }
         finally { currentOwner = previous; }
     }
+    internal Message WaitOwned(string owner, Message request, bool final)
+    {
+        string previous = currentOwner;
+        currentOwner = owner;
+        try { return Wait(request, final); }
+        finally { currentOwner = previous; }
+    }
+    // WAIT: target ref, member name, mode (0 until it differs from the value, 1 until it
+    // equals it), scalar value, timeout ms. Answers [met, current value] once met, or
+    // unmet at the deadline; null meanwhile. Scalars only, so waiting makes no handles.
+    private Message Wait(Message request, bool final)
+    {
+        Need(request, 5);
+        Value target = request.Values[0];
+        string name = request.Values[1].AsString();
+        int mode = request.Values[2].AsInt32();
+        if (mode != 0 && mode != 1) throw new ArgumentOutOfRangeException("mode", "WAIT mode is 0 (differs) or 1 (equals).");
+        object value;
+        if (target.Kind == ValueKind.Object) { object instance = RequireObject(target.AsObject()); value = GetMember(instance.GetType(), instance, false, name); }
+        else if (target.Kind == ValueKind.Type) value = GetMember(RequireType(target.AsType()), null, true, name);
+        else throw new InvalidOperationException("WAIT target must be an object or type reference.");
+        Value current = Scalar(value, name);
+        bool met = SameScalar(current, request.Values[3]) == (mode == 1);
+        return met || final ? Result(request, Value.Boolean(met), current) : null;
+    }
+    private static Value Scalar(object value, string name)
+    {
+        if (value == null) return Value.Null();
+        if (value is bool flag) return Value.Boolean(flag);
+        if (value is string text) return Value.String(text);
+        if (value is float single) return Value.Single(single);
+        if (value is double real) return Value.Double(real);
+        if (value is Enum || value is byte || value is sbyte || value is short || value is ushort || value is int || value is uint || value is long)
+            return Value.Int64(Convert.ToInt64(value));
+        throw new InvalidOperationException("WAIT observes scalar members only; " + name + " is " + value.GetType().FullName + ".");
+    }
+    private static bool SameScalar(Value a, Value b)
+    {
+        bool integral = (a.Kind == ValueKind.Int32 || a.Kind == ValueKind.Int64) && (b.Kind == ValueKind.Int32 || b.Kind == ValueKind.Int64);
+        if (integral) return (a.Kind == ValueKind.Int32 ? a.AsInt32() : a.AsInt64()) == (b.Kind == ValueKind.Int32 ? b.AsInt32() : b.AsInt64());
+        if (Number(a, out double x) && Number(b, out double y)) return x.Equals(y);
+        if (a.Kind != b.Kind) return false;
+        if (a.Kind == ValueKind.Null) return true;
+        if (a.Kind == ValueKind.Boolean) return a.AsBoolean() == b.AsBoolean();
+        return a.Kind == ValueKind.String && string.Equals(a.AsString(), b.AsString(), StringComparison.Ordinal);
+    }
+    private static bool Number(Value value, out double number)
+    {
+        switch (value.Kind)
+        {
+            case ValueKind.Int32: number = value.AsInt32(); return true;
+            case ValueKind.Int64: number = value.AsInt64(); return true;
+            case ValueKind.Single: number = value.AsSingle(); return true;
+            case ValueKind.Double: number = value.AsDouble(); return true;
+            default: number = 0; return false;
+        }
+    }
     internal void ReleaseOwner(string owner)
     {
         foreach (long id in objectOwners.Where(x => x.Value == owner).Select(x => x.Key).ToArray())
@@ -156,6 +213,11 @@ internal sealed class ReflectionBroker
 
                 case MessageKind.Batch:
                     return Batch(request);
+
+                case MessageKind.Wait:
+                    throw new InvalidOperationException(
+                        "WAIT runs only as its own request, with a timeout of 0.." + ControlServer.MaxWaitMs + " ms."
+                    );
 
                 default:
                     throw new InvalidOperationException(

@@ -4,6 +4,7 @@
 // are absent from the headless host; the protocol, handles and roots are the player's.
 //
 //   SkunkworksHost selftest     serve a private pipe and check the protocol's behavior against it
+//   SkunkworksHost measure      time Wait against polling on a host pumped at 60 Hz
 //   SkunkworksHost probe PIPE   ask a running player its Unity version, generic roots and terminal status
 //   SkunkworksHost quit PIPE    ask a running player to quit
 using System;
@@ -54,6 +55,7 @@ internal sealed class Client : IDisposable
     public string Owner { get; }
 
     public Message Send(Message message) { Wire.Write(pipe, message); return Wire.Read(pipe); }
+    public void Post(Message message) => Wire.Write(pipe, message);
     public Message Ask(MessageKind kind, params Value[] values) => Send(new Message(next++, kind, values));
 
     // Steps reference earlier results with Value.BatchRef(N); the reply holds each step's result.
@@ -84,11 +86,12 @@ internal static class Host
         try
         {
             if (args.Length == 1 && args[0] == "selftest") return SelfTest();
+            if (args.Length == 1 && args[0] == "measure") return Measure();
             if (args.Length == 2 && args[0] == "probe") return Probe(args[1]);
             if (args.Length == 2 && args[0] == "quit") return Quit(args[1]);
         }
         catch (Exception error) { Console.Error.WriteLine("FAIL: " + error.Message); return 1; }
-        Console.Error.WriteLine("usage: SkunkworksHost selftest | probe PIPE | quit PIPE");
+        Console.Error.WriteLine("usage: SkunkworksHost selftest | measure | probe PIPE | quit PIPE");
         return 2;
     }
 
@@ -98,7 +101,7 @@ internal static class Host
         private readonly ManualResetEventSlim stop = new ManualResetEventSlim();
         private readonly Thread pump;
 
-        public Instance(string pipe)
+        public Instance(string pipe, int pumpMs = 2)
         {
             Pipe = pipe;
             var ready = new ManualResetEventSlim();
@@ -111,12 +114,13 @@ internal static class Host
                     broker.RegisterRoot("reflection", broker);
                     broker.RegisterRoot("values", new NativeValues(broker.DecodeValue));
                     broker.RegisterRoot("host", new HostInfo(pipe));
+                    broker.RegisterRoot("fixture", new HostFixture("start"));
                     using (var server = new ControlServer(pipe))
                     {
                         server.Start();
                         broker.RegisterRoot("dispatch", server.Status);
                         ready.Set();
-                        while (!stop.IsSet) { server.Pump(broker.HandleOwned, broker.ReleaseOwner, 64, broker.DescribeRequest); Thread.Sleep(2); }
+                        while (!stop.IsSet) { server.Pump(broker.HandleOwned, broker.ReleaseOwner, 64, broker.DescribeRequest, broker.WaitOwned); Thread.Sleep(pumpMs); }
                     }
                 }
                 catch (Exception error) { failure = error; ready.Set(); }
@@ -254,9 +258,137 @@ internal static class Host
                 using (var client = new Client(a.Pipe))
                     Require(client.Ask(MessageKind.Get, Value.Object(held), S("Pipe")).Kind == MessageKind.Fault, "a released handle still resolved");
             });
+
+            using (var client = new Client(a.Pipe))
+                client.Answer(
+                    Step(MessageKind.Type, S("HostFixture")), Step(MessageKind.New, Ref(0), I(-1), S("idle")),
+                    Step(MessageKind.Find, S("reflection")), Step(MessageKind.Call, Ref(2), S("RegisterRoot"), I(0), I(-1), S("selftest.wait"), Ref(1)));
+
+            Test("a wait answers when its member changes, while other requests keep answering", () =>
+            {
+                using (var waiter = new Client(a.Pipe))
+                using (var other = new Client(a.Pipe))
+                {
+                    Value target = waiter.Ask(MessageKind.Find, S("selftest.wait")).Values[0];
+                    var waiting = System.Threading.Tasks.Task.Run(() => waiter.Ask(MessageKind.Wait, target, S("Name"), I(0), S("idle"), I(10000)));
+                    Thread.Sleep(100);
+                    var clock = System.Diagnostics.Stopwatch.StartNew();
+                    for (int n = 0; n < 20; n++) other.Answer(Step(MessageKind.Find, S("selftest.wait")), Step(MessageKind.Get, Ref(0), S("Name")));
+                    Require(clock.ElapsedMilliseconds < 2000 && !waiting.IsCompleted, "other requests waited behind the wait (" + clock.ElapsedMilliseconds + " ms)");
+                    other.Answer(Step(MessageKind.Find, S("selftest.wait")), Step(MessageKind.Set, Ref(0), S("Name"), S("go")));
+                    Require(waiting.Wait(2000), "the wait did not answer the change");
+                    Message reply = waiting.Result;
+                    Require(reply.Kind == MessageKind.Result && reply.Values[0].AsBoolean() && reply.Values[1].AsString() == "go", "reply: " + Client.Text(reply));
+                }
+            });
+
+            Test("a wait already met answers at once, and an unmet one answers at its deadline", () =>
+            {
+                using (var client = new Client(a.Pipe))
+                {
+                    Value target = client.Ask(MessageKind.Find, S("selftest.wait")).Values[0];
+                    var clock = System.Diagnostics.Stopwatch.StartNew();
+                    Message met = client.Ask(MessageKind.Wait, target, S("Name"), I(1), S("go"), I(10000));
+                    Require(met.Values[0].AsBoolean() && clock.ElapsedMilliseconds < 1000, "a met wait took " + clock.ElapsedMilliseconds + " ms");
+                    clock.Restart();
+                    Message unmet = client.Ask(MessageKind.Wait, target, S("Name"), I(1), S("never"), I(300));
+                    Require(unmet.Kind == MessageKind.Result && !unmet.Values[0].AsBoolean() && unmet.Values[1].AsString() == "go", "reply: " + Client.Text(unmet));
+                    Require(clock.ElapsedMilliseconds >= 300 && clock.ElapsedMilliseconds < 2000, "the deadline answered after " + clock.ElapsedMilliseconds + " ms");
+                }
+            });
+
+            Test("a wait inside a batch, past the timeout cap, or on a non-scalar member is refused", () =>
+            {
+                using (var client = new Client(a.Pipe))
+                {
+                    Value target = client.Ask(MessageKind.Find, S("selftest.wait")).Values[0];
+                    Require(client.Batch(Step(MessageKind.Wait, target, S("Name"), I(0), S("go"), I(100))).Kind == MessageKind.Fault, "a batched wait ran");
+                    Require(client.Ask(MessageKind.Wait, target, S("Name"), I(0), S("go"), I(600000)).Kind == MessageKind.Fault, "a 600 s wait was accepted");
+                    Value encoding = client.Ask(MessageKind.Type, S("System.Text.Encoding")).Values[0];
+                    Message reply = client.Ask(MessageKind.Wait, encoding, S("UTF8"), I(0), Value.Null(), I(100));
+                    Require(reply.Kind == MessageKind.Fault && Client.Text(reply).Contains("scalar"), "reply: " + Client.Text(reply));
+                }
+            });
+
+            Test("a wait ends when its client leaves", () =>
+            {
+                var waiter = new Client(a.Pipe);
+                Value target = waiter.Ask(MessageKind.Find, S("selftest.wait")).Values[0];
+                // A read blocked on another thread keeps a Windows pipe handle open: send, then leave.
+                waiter.Post(new Message(99, MessageKind.Wait, target, S("Name"), I(1), S("never"), I(30000)));
+                Message[] count = { Step(MessageKind.Find, S("dispatch")), Step(MessageKind.Get, Ref(0), S("Waiters")) };
+                using (var other = new Client(a.Pipe))
+                {
+                    int parked = 0;
+                    for (var deadline = DateTime.UtcNow.AddSeconds(2); parked == 0 && DateTime.UtcNow < deadline; Thread.Sleep(10)) parked = other.Answer(count)[1].AsInt32();
+                    Require(parked == 1, "the wait never parked");
+                    waiter.Dispose();
+                    for (var deadline = DateTime.UtcNow.AddSeconds(2); parked != 0 && DateTime.UtcNow < deadline; Thread.Sleep(10)) parked = other.Answer(count)[1].AsInt32();
+                    Require(parked == 0, "the wait outlived its client");
+                }
+            });
         }
         Console.Out.WriteLine("SKUNKWORKS_HOST_OK tests=" + passed);
         return 0;
+    }
+
+    // Wait against polling on a host pumped like a 60 Hz player: how long a change takes to be
+    // seen, how many requests Unity's thread serves meanwhile, and what one waiter costs per pump.
+    private static int Measure()
+    {
+        const int rounds = 40, pollMs = 250;
+        using (var host = new Instance("skunkworks.unity.measure-" + Guid.NewGuid().ToString("N").Substring(0, 8), 16))
+        using (var setter = new Client(host.Pipe))
+        using (var watcher = new Client(host.Pipe))
+        {
+            Value target = watcher.Ask(MessageKind.Find, S("fixture")).Values[0];
+            Message[] set(int n) => new[] { Step(MessageKind.Find, S("fixture")), Step(MessageKind.Set, Ref(0), S("Name"), S("v" + n)) };
+            Message[] executed = { Step(MessageKind.Find, S("dispatch")), Step(MessageKind.Get, Ref(0), S("Executed")) };
+            var random = new Random(7);
+            var waited = new List<double>(); var polled = new List<double>();
+            long before = setter.Answer(executed)[1].AsInt64();
+            for (int n = 0; n < rounds; n++)
+            {
+                string old = watcher.Ask(MessageKind.Get, target, S("Name")).Values[0].AsString();
+                var waiting = System.Threading.Tasks.Task.Run(() => watcher.Ask(MessageKind.Wait, target, S("Name"), I(0), S(old), I(10000)));
+                Thread.Sleep(random.Next(20, 300));
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                setter.Answer(set(n));
+                waiting.Wait();
+                waited.Add(clock.Elapsed.TotalMilliseconds);
+            }
+            long waitRequests = setter.Answer(executed)[1].AsInt64() - before - rounds;
+            before = setter.Answer(executed)[1].AsInt64();
+            for (int n = 0; n < rounds; n++)
+            {
+                string old = watcher.Ask(MessageKind.Get, target, S("Name")).Values[0].AsString();
+                var clock = new System.Diagnostics.Stopwatch();
+                var setting = System.Threading.Tasks.Task.Run(() => { Thread.Sleep(random.Next(20, 300)); clock.Start(); setter.Answer(set(rounds + n)); });
+                while (watcher.Ask(MessageKind.Get, target, S("Name")).Values[0].AsString() == old) Thread.Sleep(pollMs);
+                polled.Add(clock.Elapsed.TotalMilliseconds);
+                setting.Wait();
+            }
+            long pollRequests = setter.Answer(executed)[1].AsInt64() - before - rounds;
+            Console.Out.WriteLine("wake  " + Summary(waited) + " requests/change=" + (waitRequests / (double)rounds).ToString("0.0"));
+            Console.Out.WriteLine("poll" + pollMs + " " + Summary(polled) + " requests/change=" + (pollRequests / (double)rounds).ToString("0.0"));
+        }
+        var broker = new ReflectionBroker();
+        broker.RegisterRoot("fixture", new HostFixture("still"));
+        Value fixture = broker.HandleOwned("bench", new Message(1, MessageKind.Find, S("fixture"))).Values[0];
+        var unmet = new Message(2, MessageKind.Wait, fixture, S("Name"), I(0), S("still"), I(1000));
+        for (int n = 0; n < 1000; n++) broker.WaitOwned("bench", unmet, false);
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        const int evaluations = 200000;
+        for (int n = 0; n < evaluations; n++) broker.WaitOwned("bench", unmet, false);
+        Console.Out.WriteLine("evaluate " + (timer.Elapsed.TotalMilliseconds * 1000000 / evaluations).ToString("0") + " ns per waiter per pump");
+        return 0;
+    }
+    private static string Summary(List<double> samples)
+    {
+        samples.Sort();
+        double sum = 0; foreach (double sample in samples) sum += sample;
+        return "ms median=" + samples[samples.Count / 2].ToString("0.0") + " p95=" + samples[(int)(samples.Count * .95)].ToString("0.0") +
+            " mean=" + (sum / samples.Count).ToString("0.0") + " max=" + samples[samples.Count - 1].ToString("0.0");
     }
 
     // A running player: its Unity version, its generic roots and its terminal, one line each.

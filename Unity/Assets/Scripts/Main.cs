@@ -68,7 +68,7 @@ public sealed class Main : MonoBehaviour
             SystemPaths.Log("input", error);
             Debug.LogError("[input] " + error);
         }
-        control?.Pump(reflection.HandleOwned, reflection.ReleaseOwner, 64, reflection.DescribeRequest);
+        control?.Pump(reflection.HandleOwned, reflection.ReleaseOwner, 64, reflection.DescribeRequest, reflection.WaitOwned);
     }
 
     private static void Report(string source, Exception error)

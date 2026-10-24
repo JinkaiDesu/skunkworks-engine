@@ -18,13 +18,16 @@ internal sealed class ControlServer : IDisposable
         internal readonly Message Request;
         internal readonly string Owner;
         internal readonly TaskCompletionSource<Message> Done = new TaskCompletionSource<Message>();
-        internal int State; // 0 queued, 1 executing, 2 completed/cancelled
+        internal int State; // 0 queued, 1 executing, 2 completed/cancelled, 3 waiting
+        internal long Deadline;
         internal Work(Message request, string owner) { Request = request; Owner = owner; }
     }
     // Clients choose their own deadline (up to 300 s) and disconnect when it
     // expires; the server notices the disconnect within one probe interval.
     // This ceiling only bounds a client that stays connected but never reads.
     internal const int MaxRequestWaitMs = 300000;
+    // A Wait holds its connection, never a request slot; clients repeat it for longer waits.
+    internal const int MaxWaitMs = 60000;
     private const int ProbeIntervalMs = 50;
     private readonly string pipeName;
     private readonly ConcurrentQueue<Work> queue = new ConcurrentQueue<Work>();
@@ -33,12 +36,14 @@ internal sealed class ControlServer : IDisposable
     private readonly HashSet<NamedPipeServerStream> clients = new HashSet<NamedPipeServerStream>();
     private NamedPipeServerStream waiting;
     private Thread listener;
-    private int stopping, queued;
+    private readonly List<Work> waiters = new List<Work>(); // Unity's thread only
+    private int stopping, queued, waiterCount;
     internal readonly DispatchStatus Status;
     internal bool ListenerStopped => listener == null || !listener.IsAlive;
     internal ControlServer(string pipeName) { this.pipeName = pipeName; Status = new DispatchStatus(this); }
     internal int QueueDepth => Math.Max(0, Volatile.Read(ref queued));
     internal int ClientCount { get { lock (gate) return clients.Count; } }
+    internal int WaiterCount => Volatile.Read(ref waiterCount);
     internal void Start()
     {
         if (listener != null) throw new InvalidOperationException("IPC already started.");
@@ -47,8 +52,10 @@ internal sealed class ControlServer : IDisposable
     }
     internal int Pump(Func<Message, Message> handler, int maximum)
         => Pump((owner, request) => handler(request), owner => { }, maximum);
+    // wait answers a parked Wait on Unity's thread: null while its condition is unmet,
+    // the reply once it is met or, when final, at its deadline.
     internal int Pump(Func<string, Message, Message> handler, Action<string> releaseOwner, int maximum,
-        Func<Message, string> describe = null)
+        Func<Message, string> describe = null, Func<string, Message, bool, Message> wait = null)
     {
         var clock = Stopwatch.StartNew();
         int count = 0;
@@ -56,6 +63,7 @@ internal sealed class ControlServer : IDisposable
         {
             Interlocked.Decrement(ref queued);
             if (Interlocked.CompareExchange(ref work.State, 1, 0) != 0) continue;
+            if (work.Request != null && work.Request.Kind == MessageKind.Wait && wait != null && Park(work)) { count++; continue; }
             long started = Stopwatch.GetTimestamp();
             try
             {
@@ -72,8 +80,37 @@ internal sealed class ControlServer : IDisposable
                 Status.RecordExecuted(work.Request, work.Done.Task.Result, Stopwatch.GetTimestamp() - started, describe);
             count++;
         }
+        if (wait != null) Signal(wait);
         Status.RecordPump(clock.Elapsed.TotalMilliseconds);
         return count;
+    }
+    private bool Park(Work work)
+    {
+        Value[] values = work.Request.Values;
+        int timeout = values.Length == 5 && values[4].Kind == ValueKind.Int32 ? values[4].AsInt32() : -1;
+        if (timeout < 0 || timeout > MaxWaitMs) return false; // the handler faults it as a malformed Wait
+        work.Deadline = Stopwatch.GetTimestamp() + timeout * Stopwatch.Frequency / 1000;
+        Interlocked.Exchange(ref work.State, 3);
+        waiters.Add(work);
+        return true;
+    }
+    private void Signal(Func<string, Message, bool, Message> wait)
+    {
+        long now = Stopwatch.GetTimestamp();
+        for (int i = waiters.Count - 1; i >= 0; i--)
+        {
+            Work work = waiters[i];
+            // Its pipe thread cancels a waiter whose client left.
+            if (Interlocked.CompareExchange(ref work.State, 1, 3) != 3) { waiters.RemoveAt(i); continue; }
+            Message reply;
+            try { reply = wait(work.Owner, work.Request, now >= work.Deadline); }
+            catch (Exception error) { reply = Fault(work.Request, error.Message); }
+            if (reply == null) { Interlocked.Exchange(ref work.State, 3); continue; }
+            waiters.RemoveAt(i);
+            work.Done.TrySetResult(reply);
+            Interlocked.Exchange(ref work.State, 2);
+        }
+        Volatile.Write(ref waiterCount, waiters.Count);
     }
     private static Message Fault(Message request, string error) =>
         new Message(request.Id, MessageKind.Fault, Value.String(error));
@@ -170,7 +207,8 @@ internal sealed class ControlServer : IDisposable
                     if (!gone && waited.ElapsedMilliseconds < MaxRequestWaitMs) continue;
                     // A request that has not started never runs for an absent or
                     // expired client; running CLR work cannot be preempted.
-                    bool cancelled = Interlocked.CompareExchange(ref work.State, 2, 0) == 0;
+                    bool cancelled = Interlocked.CompareExchange(ref work.State, 2, 0) == 0 ||
+                        Interlocked.CompareExchange(ref work.State, 2, 3) == 3;
                     Status.RecordUnanswered(request, cancelled, gone);
                     if (!gone) Wire.Write(stream, Fault(request, cancelled
                         ? "Request expired before execution; it will not run."
@@ -212,6 +250,9 @@ internal sealed class ControlServer : IDisposable
             Interlocked.Exchange(ref work.State, 2);
             work.Done.TrySetResult(work.Request == null ? null : Fault(work.Request, "Runtime stopping."));
         }
+        foreach (Work work in waiters)
+            if (Interlocked.Exchange(ref work.State, 2) != 2) work.Done.TrySetResult(Fault(work.Request, "Runtime stopping."));
+        waiters.Clear();
         // No synchronous native wait on Unity's teardown thread.
     }
 }
@@ -240,6 +281,9 @@ public sealed class DispatchStatus
 
     public int QueueDepth => server.QueueDepth;
     public int Clients => server.ClientCount;
+    /// <summary>Connections parked in a Wait.</summary>
+    public int Waiters => server.WaiterCount;
+    public int MaxWaitMs => ControlServer.MaxWaitMs;
     /// <summary>Requests executed on Unity's thread (handle releases excluded).</summary>
     public long Executed => Interlocked.Read(ref executed);
     public long Faulted => Interlocked.Read(ref faulted);
@@ -289,7 +333,7 @@ public sealed class DispatchStatus
         var c = System.Globalization.CultureInfo.InvariantCulture;
         string longestText; double longestValue, pump;
         lock (gate) { longestText = longest; longestValue = longestMs; pump = maxPumpMs; }
-        return "{\"queue_depth\":" + QueueDepth + ",\"clients\":" + Clients + ",\"executed\":" + Executed +
+        return "{\"queue_depth\":" + QueueDepth + ",\"clients\":" + Clients + ",\"waiters\":" + Waiters + ",\"executed\":" + Executed +
             ",\"faulted\":" + Faulted + ",\"slow\":" + SlowRequests + ",\"abandoned\":" + Abandoned +
             ",\"orphaned\":" + Orphaned + ",\"expired\":" + Expired + ",\"long_pumps\":" + LongPumps +
             ",\"max_pump_ms\":" + pump.ToString("0.###", c) + ",\"longest_ms\":" + longestValue.ToString("0.###", c) +
