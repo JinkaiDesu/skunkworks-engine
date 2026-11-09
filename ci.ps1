@@ -3,8 +3,8 @@
 .SYNOPSIS
   Skunkworks' own CI/CD, run by hand.
   Skunkworks depends on nothing but Unity and the .NET CLR, and its CI tests nothing but Skunkworks.
-    verify   fast checks, no Unity: the generated protocol, and the protocol's behavior against the headless player
-             (tests/host selftest, .NET only). Run it before every push.
+    verify   fast checks, no Unity: the behavior of the host's input journal, compiled from the Unity project's own
+             source (tests/host selftest, .NET only). Run it before every push.
     build    the website demo, Release/skunkworks-v<version>-demo: the Unity build and its acceptance, the zip, the
              release tests against the running player, then its manifest (emergence.manifest/1).
     publish  the built demo to Cloudflare R2: the zip and its manifest under skunkworks/<version>/ (immutable), then the
@@ -71,13 +71,12 @@ function Get-Remote([string]$Url, [string]$OutFile) {
 
 switch ($Step) {
     'verify' {
-        Invoke-Script 'Unity/Packages/com.skunkworks.protocol/generate.ps1' @('-Check')
         Write-Host '== tests/host selftest'
         $build = Join-Path ([IO.Path]::GetTempPath()) "skunkworks host $([guid]::NewGuid().ToString('N').Substring(0, 8))"
         try {
             $lines = @(& dotnet run --project (Join-Path $root 'tests/host/SkunkworksHost.csproj') -c Release --artifacts-path $build "-p:SkunkworksSource=$root" -- selftest 2>&1 |
                 ForEach-Object { $text = "$_"; Write-Host $text; $text })
-            if ($LASTEXITCODE -ne 0 -or -not @($lines | Where-Object { $_ -match '^SKUNKWORKS_HOST_OK\b' }).Count) { throw 'The protocol selftest failed.' }
+            if ($LASTEXITCODE -ne 0 -or -not @($lines | Where-Object { $_ -match '^SKUNKWORKS_HOST_OK\b' }).Count) { throw 'The input journal selftest failed.' }
         } finally { Remove-Item -LiteralPath $build -Recurse -Force -ErrorAction SilentlyContinue }
         Write-Host 'SKUNKWORKS_VERIFY_OK'
     }

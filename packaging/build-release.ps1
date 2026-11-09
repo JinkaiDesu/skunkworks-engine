@@ -7,7 +7,7 @@
 .DESCRIPTION
   -Acceptance     tests/demo-release.ps1, run on the result
   The release is Skunkworks/ (the player) and Licenses/, with Licenses/Provenance/build-inputs.json and
-  release.receipt.json. The player has no terminal configuration: a product supplies one with SKUNK_TERMINAL_CONFIG.
+  release.receipt.json.
 
 .EXAMPLE
   pwsh packaging/build-release.ps1 -UnityEditor <Unity.exe> -Acceptance tests/demo-release.ps1
@@ -40,7 +40,6 @@ $editorVersion = ($editorProduct -split '_')[0]
 if ($editorVersion -cne $unityVersion) { throw "Unity Editor version mismatch: required $unityVersion, supplied $editorVersion." }
 Assert-EmptyDirectory $OutputDirectory
 [IO.Directory]::CreateDirectory($WorkDirectory) | Out-Null
-& (Join-Path $unityProject 'Packages\com.skunkworks.protocol\generate.ps1') -Check
 
 $unityFiles = @(foreach ($folder in @('Assets', 'Packages', 'ProjectSettings')) {
         Get-TreeFiles (Join-Path $unityProject $folder) | ForEach-Object {
@@ -96,14 +95,6 @@ $rootLicense = Join-Path $repoRoot 'LICENSE'
 if (Test-Path -LiteralPath $rootLicense) { Copy-Item -LiteralPath $rootLicense -Destination (Join-Path $OutputDirectory 'Licenses\Skunkworks-LICENSE.txt') }
 $rootNotice = Join-Path $repoRoot 'NOTICE'
 if (Test-Path -LiteralPath $rootNotice) { Copy-Item -LiteralPath $rootNotice -Destination (Join-Path $OutputDirectory 'Licenses\Skunkworks-NOTICE.txt') }
-$rootNotices = Join-Path $repoRoot 'Licenses'
-if (Test-Path -LiteralPath $rootNotices) {
-    foreach ($file in Get-ChildItem -LiteralPath $rootNotices -Recurse -File) {
-        $target = Join-Path $OutputDirectory ('Licenses/' + [IO.Path]::GetRelativePath($rootNotices, $file.FullName))
-        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target)) | Out-Null
-        Copy-Item -LiteralPath $file.FullName -Destination $target
-    }
-}
 # Provenance: every input the player was built from.
 $provenance = Join-Path $OutputDirectory 'Licenses\Provenance'
 [IO.Directory]::CreateDirectory($provenance) | Out-Null
@@ -111,7 +102,6 @@ $inputs = [ordered]@{
     unity = [ordered]@{ version = $unityVersion; editorProduct = $editorProduct; editorSha256 = Get-Sha256 $UnityEditor; reusedPlayerReceiptSha256 = $playerReuseReceipt; files = $unityFiles }
     rootLicenseSha256 = Get-Sha256 $rootLicense
     metadataFiles = @('.gitattributes', '.gitignore' | ForEach-Object { [ordered]@{ path = $_; sha256 = Get-Sha256 (Join-Path $repoRoot $_) } })
-    noticesFiles = @(Get-TreeFiles $rootNotices)
     packagingFiles = @(Get-TreeFiles $PSScriptRoot)
 }
 $inputsHash = Get-TextHash ($inputs | ConvertTo-Json -Depth 100 -Compress)
@@ -119,9 +109,9 @@ Write-Json (Join-Path $provenance 'build-inputs.json') $inputs
 $files = @(Get-TreeFiles $OutputDirectory)
 Write-Json (Join-Path $OutputDirectory 'release.receipt.json') ([ordered]@{
         schemaVersion = 1; edition = 'demo'; demoReady = $true; inputSha256 = $inputsHash
-        version = $Version; experimentalApis = @('simulation-boundary commits', 'coordinated checkpoints')
+        version = $Version
         tools = [ordered]@{ unity = $unityVersion; unityEditorVersion = $editorProduct }
-        capabilities = @('skunkworks.wire/1', 'Experimental boundary commits', 'Experimental coordinated checkpoints'); files = $files
+        files = $files
         reproducibility = 'Input identity and output hashes; Unity output bytes are not asserted bit-for-bit deterministic.'
     })
 & $Acceptance -ReleaseRoot $OutputDirectory

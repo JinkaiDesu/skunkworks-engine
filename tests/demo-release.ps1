@@ -26,8 +26,8 @@ $receipt = Read-Json (Join-Path $ReleaseRoot 'release.receipt.json')
 if ($receipt.schemaVersion -ne 1) { throw 'Unsupported release receipt.' }
 if ($receipt.edition -cne 'demo' -or !$receipt.demoReady) { throw 'The release is not the demo build.' }
 
-# Skunkworks' license, its fonts' licenses and the build's provenance ship with it.
-$required = @('Licenses/Skunkworks-LICENSE.txt', 'Licenses/RedditMono/OFL.txt', 'Licenses/CascadiaCode/OFL.txt', 'Licenses/Provenance/build-inputs.json')
+# Skunkworks' license and the build's provenance ship with it.
+$required = @('Licenses/Skunkworks-LICENSE.txt', 'Licenses/Provenance/build-inputs.json')
 foreach ($path in $required) { if (!(Test-Path -LiteralPath (Join-Path $ReleaseRoot $path) -PathType Leaf)) { throw "Release file missing: $path" } }
 if (!(Test-Path -LiteralPath (Join-Path $ReleaseRoot 'Skunkworks/Skunkworks.exe') -PathType Leaf)) { throw 'The release has no player.' }
 

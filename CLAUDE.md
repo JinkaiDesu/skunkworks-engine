@@ -7,23 +7,24 @@
 ## Constraints
 
 - **Skunkworks is core.** It depends on Unity 6000.5.6f1 and the .NET CLR, nothing else. It never bundles, builds against or tests against another project (hirari, skunkworks_cli, Craftwork or any other); they depend on it, never the reverse.
-- **Unity owns** objects, components, rendering and lifecycle. Reflection requests run on Unity's `Update`.
-- **The shell is configuration, and there is no default.** `SKUNK_TERMINAL_CONFIG` (or a product's `StreamingAssets/terminal.config`) selects the executable, environment, PATH and startup; without one the terminal stays stopped and says so. The C# supervisor knows no shell's syntax.
-- **The protocol is a published contract.** `Unity/Packages/com.skunkworks.protocol/schema.json` is canonical; `generate.ps1` writes the C# codec from it and `-Check` fails on drift. Clients copy the schema and follow it; Skunkworks never checks them.
-- **Handles belong to their connection** and are released when it closes. Registered roots (`RegisterRoot`) persist.
-- **The `unity` command belongs to skunkworks-cli,** which publishes it beside `skunkworks_cli.exe`. The DLL route (`Dev/`) was removed on 2026-10-16 as a failed design that mixed state, lifecycle and data in one node; never `git restore` or recreate `Dev/`.
-- **No engine distribution.** Skunkworks is a standalone demo and portfolio piece; the owner has no Unity license to distribute it as a primarily reflective, moddable engine. The only binary is the website demo, `skunkworks-v<version>-demo`. Never package, name or describe a build as a moddable or reusable engine, SDK or platform release: others build from source under their own Unity license.
+- **Skunkworks is a host, not a runtime.** It owns the window, rendering, input capture, startup, shutdown and the player log, on a blank canvas. It has no world, simulation, shell, terminal, command surface or scripting interface, and needs none to start.
+- **The computation is foreign.** A native, external system will compute; Skunkworks collects its input and presents its output. That system and its transport are not designed yet: add no interface, bridge, memory layout or placeholder type for them until the owner designs one.
+  - **Foreign input** is `InputEvents` (Unity's Input System, observe only) copying device facts into `InputProgram`, a bounded journal read by sequence. Nothing is delivered or pumped.
+  - **Foreign output** is Unity's renderer. `Home.unity` holds one camera that clears the canvas; nothing presents on it yet.
+- **Unity's loop is Unity's.** `Update` and `FixedUpdate` pace Unity-specific work only. No host logic runs on them, and Unity's frame time, GameObjects and physics are never the authority for the foreign computation. `Main` has neither method.
+- **Removed on 2026-11-08, last present in 0.6.1-experimental (`027f2c0`):** the CLR reflection broker, the `skunkworks.wire/1` named pipe and protocol package, the embedded terminal and shell supervision, `RuntimeBoundary`, `WindowControl` and `SystemPaths`. They do not come back as compatibility or convenience layers; restore one only if the owner asks. The DLL route (`Dev/`) was removed on 2026-10-16 as a failed design that mixed state, lifecycle and data in one node; never `git restore` or recreate `Dev/`.
+- **No engine distribution.** Skunkworks is a standalone demo and portfolio piece; the owner has no Unity license to distribute it as a moddable engine. The only binary is the website demo, `skunkworks-v<version>-demo`. Never package, name or describe a build as a moddable or reusable engine, SDK or platform release: others build from source under their own Unity license.
 - **No signing here.** The demo and its manifest are published unsigned; the VPS countersigns what the launcher trusts, after the owner approves a version. No signing keys live on this PC.
-- **Protected semantics:** reflection, IPC and protocol changes go on a branch, not `main`, unless the owner says otherwise.
-- **Two Markdown files:** this one and `README.md`. The README is the owner's, for people: under 80 lines, no internal docs or contributor detail. Internal notes live in the workspace's `Agent/Skunkworks Unity Project/`.
+- **Two Markdown files:** this one and `README.md`. The README is the owner's, for people: under 80 lines, no internal docs or contributor detail. Internal notes live in the workspace's `Agent/skunkworks-engine/`.
 
 ## Working here
 
-- **Layout:** `Unity/` (Unity 6000.5.6f1; runtime in `Assets/Scripts`, protocol in `Packages/com.skunkworks.protocol`), `packaging/`, `tests/` (`host/` is the headless player and its .NET client), `Release/` (builds and logs, ignored), `component.json` (the version).
+- **Layout:** `Unity/` (Unity 6000.5.6f1; the host is `Assets/Scripts`, the canvas is `Assets/Scenes/Home.unity`), `packaging/`, `tests/` (`host/` compiles the input journal without Unity), `Release/` (builds and logs, ignored), `component.json` (the version).
 - **CI/CD is `ci.ps1`, run by hand, for Skunkworks only;** its inputs are in the git-ignored `ci.config.json` (see the script's help).
-  - `verify`: the generated protocol, then `tests/host selftest`, the protocol's behavior against the headless player. No Unity.
-  - `build`: from a pushed, clean commit, `packaging/build-release.ps1` (the player and its licenses; `tests/demo-release.ps1` accepts it), `packaging/pack.ps1`, `tests/release.tests.ps1` against the running player, then `Release/skunkworks-v<version>-demo.manifest.json`.
-  - `publish`: from this PC with the user's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, to R2 `skunkworks/<version>/` (the zip and its manifest, immutable, never overwritten), then the moving `skunkworks/manifest.json` (no-cache).
+  - `verify`: `tests/host selftest`, the input journal's behavior. No Unity.
+  - `build`: from a pushed, clean commit, `packaging/build-release.ps1` (the player and its license; `tests/demo-release.ps1` accepts it), `packaging/pack.ps1`, `tests/release.tests.ps1` against the running player, then `Release/skunkworks-v<version>-demo.manifest.json`.
+  - `publish`: from this PC with the user's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, to R2 `skunkworks/<version>/` (the zip and its manifest, immutable, never overwritten), then the moving `skunkworks/manifest.json` (no-cache). The launcher polls that file and its Play session depends on the 0.6.1 terminal, so publishing a host build breaks Play until the launcher changes.
 - **The manifest is this project's whole interface** to the website and the launcher: `emergence.manifest/1` with `platform` and `artifact.{file,key,url,bytes,sha256}`. A rebuild is a new version. The zip's root holds `release.receipt.json`.
+- **The player log is the host's voice:** `[skunkworks] started: …` and `[skunkworks] stopped: …`, in Unity's player log (`-logFile`).
 - **Tests** are behavioral and live in `tests/`. Conventions belong here, never as test assertions.
 - **Changes:** work in a worktree, `Agent/worktrees/skunkworks/<topic>` on `agent/<topic>`, run `pwsh ci.ps1 verify`, and push.

@@ -4,8 +4,8 @@
   "name": "Skunkworks",
   "kind": "product",
   "distribution": "demo",
-  "version": "0.6.1-experimental",
-  "description": "Reflective Unity (Mono) game engine: UnityEngine, the CLR and assembly DLLs from any shell.",
+  "version": "0.7.0-experimental",
+  "description": "Minimal Unity rendering host: a blank canvas that owns the window, rendering and input capture.",
   "requires": {},
   "external": {
     "unity": {

@@ -5,15 +5,14 @@ using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.LowLevel;
 
-// Replace the old InputEvent.cs / OnGUI tap with this file.
-// The MonoBehaviour filename must be InputEvents.cs; do not keep two InputEvents classes.
+// Collects what Unity's Input System reports and copies it into Program. Observe only: nothing is marked
+// handled and no input setting is changed. Sample times are real time on the Input System's clock, never
+// the frame's.
 [DisallowMultipleComponent]
 public sealed class InputEvents : MonoBehaviour
 {
-    public static InputEvents Current { get; private set; }
     public InputProgram Program { get; private set; }
     public bool Capturing => Program != null && Program.Capturing;
-    public int Count => Program == null ? 0 : Program.Count;
 
     private readonly Dictionary<int, KeyboardHook> keyboards = new Dictionary<int, KeyboardHook>();
     private bool hooked;
@@ -38,10 +37,7 @@ public sealed class InputEvents : MonoBehaviour
             "Enable Input System Package (New) or Both in Player > Active Input Handling, then rebuild the player.");
 #else
         if (hooked) return;
-        if (Current != null && Current != this)
-            throw new InvalidOperationException("Another InputEvents source is already active.");
         if (Program == null) Program = new InputProgram();
-        Current = this;
         hooked = true;
         Program.Capturing = true;
         InputSystem.onEvent += OnInputEvent;
@@ -69,12 +65,7 @@ public sealed class InputEvents : MonoBehaviour
         Program.KeyboardCount = 0;
         Program.Capturing = false;
         Program.Reset(Now(), "capture stopped");
-        if (Current == this) Current = null;
     }
-
-    public string Drain(int maximum) => Program.Drain(maximum);
-    public void Clear() => Program.Reset(Now(), "explicit reset");
-    public string Describe() => Program.Describe();
 
     private void OnDisable() { StopCapture(); }
     private void OnDestroy() { StopCapture(); }
@@ -130,7 +121,6 @@ public sealed class InputEvents : MonoBehaviour
     }
 
     // Copy values while the event is valid. No InputEventPtr escapes this callback.
-    // Observe only: do not set event.handled or change Unity's input settings.
     private void OnInputEvent(InputEventPtr evt, InputDevice device)
     {
         if (!Capturing || !Application.isFocused || device == null) return;

@@ -73,12 +73,6 @@ public static class Build
         );
 
 
-        PlayerSettings.SetManagedStrippingLevel(
-            target,
-            ManagedStrippingLevel.Disabled
-        );
-
-
         // ----------------------------------------------------
         // EXACTLY ONE ENABLED SCENE
         // ----------------------------------------------------
